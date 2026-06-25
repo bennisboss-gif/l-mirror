@@ -1,7 +1,6 @@
 {
-  "bin": "snapshots/l-20260625T075804Z.tar.gz.bin",
-  "sha256_bin": "791b8f12ea516a9ccde7afd9b6b78a19c92ffef389b756618bb6384dc6f5bf1b",
-  "sha256_plain": "52ba8c7c6fcec421e8fb1f4f4e1dd6d60f473d3152f9fd39a7e2a6ea93c42ddd",
-  "ts": "20260625T075804Z",
-  "note": "reserve publique chiffree AES du repo l, phase3 reconciliation-grande"
+  "bin": "snapshots/l-20260625T081849Z.tar.gz.bin",
+  "sha256_bin": "b547b9529a792c5a2bebe4db92a26be055666a3845ef6e10f867a0b501c16ddf",
+  "maj": "20260625T081849Z",
+  "note": "reserve publique chiffree, post Phase 4 write-scope statique. openssl enc -d -aes-256-cbc -pbkdf2 -> tar.gz"
 }
