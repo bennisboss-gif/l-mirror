@@ -1,8 +1,8 @@
 {
-  "bin": "snapshots/l-20260625-020509.tar.gz.bin",
-  "sha256_bin": "eca9027078caa51df6f86b98afe77cfff72dfb6a4e58a14d43015ea891f376d8",
-  "sha256_clear_targz": "3e3b98755251bcefc1ed9749f6861a857854750bbd2cde30b28bace7a3c13ff2",
-  "ts": "20260625-020509",
+  "bin": "snapshots/l-20260625T064243Z.tar.gz.bin",
+  "sha256_bin": "2961395442e44afca193cfe70985b03617d7e18d2e2872e20eddc5147725f530",
+  "sha256_clear_targz": "a6ed0a8e94f69555424be3b589f986e9e933566f2b193ab4b17e34ef8aef37b7",
+  "ts": "20260625T064243Z",
   "source_repo": "bennisboss-gif/l",
   "authority": "bennisboss-gif/l = REFERENCE ; ce miroir = reserve verifiee",
   "decrypt": "openssl enc -d -aes-256-cbc -pbkdf2 -pass pass:<memoire> ; puis tar xzf"
