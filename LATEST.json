@@ -1,9 +1,7 @@
 {
-  "bin": "snapshots/l-20260625T064243Z.tar.gz.bin",
-  "sha256_bin": "2961395442e44afca193cfe70985b03617d7e18d2e2872e20eddc5147725f530",
-  "sha256_clear_targz": "a6ed0a8e94f69555424be3b589f986e9e933566f2b193ab4b17e34ef8aef37b7",
-  "ts": "20260625T064243Z",
-  "source_repo": "bennisboss-gif/l",
-  "authority": "bennisboss-gif/l = REFERENCE ; ce miroir = reserve verifiee",
-  "decrypt": "openssl enc -d -aes-256-cbc -pbkdf2 -pass pass:<memoire> ; puis tar xzf"
+  "bin": "snapshots/l-20260625T075804Z.tar.gz.bin",
+  "sha256_bin": "791b8f12ea516a9ccde7afd9b6b78a19c92ffef389b756618bb6384dc6f5bf1b",
+  "sha256_plain": "52ba8c7c6fcec421e8fb1f4f4e1dd6d60f473d3152f9fd39a7e2a6ea93c42ddd",
+  "ts": "20260625T075804Z",
+  "note": "reserve publique chiffree AES du repo l, phase3 reconciliation-grande"
 }
