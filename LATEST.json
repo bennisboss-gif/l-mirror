@@ -1,6 +1,6 @@
 {
-  "bin": "snapshots/l-20260625T081849Z.tar.gz.bin",
-  "sha256_bin": "b547b9529a792c5a2bebe4db92a26be055666a3845ef6e10f867a0b501c16ddf",
-  "maj": "20260625T081849Z",
-  "note": "reserve publique chiffree, post Phase 4 write-scope statique. openssl enc -d -aes-256-cbc -pbkdf2 -> tar.gz"
+  "bin": "snapshots/l-20260627T113500Z.tar.gz.bin",
+  "sha256_bin": "2a937817458e77130474faa2668b286bc65504e956e0023d11600c85065b1192",
+  "maj": "20260627T113500Z",
+  "note": "reserve publique chiffree, refresh v0.16 (50 vivantes). openssl enc -d -aes-256-cbc -pbkdf2 -> tar.gz ; contient lignee/v16_bundle.bin"
 }
