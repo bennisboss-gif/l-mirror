@@ -1,7 +1,7 @@
 {
-  "bin": "snapshots/l-20260629T041935Z.tar.gz.bin",
-  "sha256_bin": "c58144658912e3b15e968cb3d3fd7e59bcfbd1fb0c2b52cec3a45f622572c538",
-  "maj": "20260629T041935Z",
-  "commit": "db1bd5b",
+  "bin": "snapshots/l-20260630T041947Z.tar.gz.bin",
+  "sha256_bin": "572979678343f29d52266f221bcc815efcaa4a8f01563a57d69ab304e224a3c7",
+  "maj": "20260630T041947Z",
+  "commit": "79e3b20",
   "note": "reserve publique chiffree (3e cran redondance). openssl enc -d -aes-256-cbc -pbkdf2 -> tar.gz ; contient l'arbre origin/main dont lignee/v16_bundle.bin"
 }
