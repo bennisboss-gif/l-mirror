@@ -1,78 +1,81 @@
-# ACTIVER-LB.ps1  (v3) -- geste unique + AUTO-DIAGNOSTIC-ET-REPARE.
-# Le script OBSERVE LB (il tourne dessus) et s'adapte ; il n'y a rien a deviner cote Claude.
+# ACTIVER-LB.ps1  (v4) -- ouvre la passerelle + REPARE LE PARE-FEU TAILNET.
+# Cause identifiee depuis LS : tailscale ping OK mais TOUT l'inbound TCP de bpc est droppe
+# (interface Tailscale en profil Public + Docker Desktop bloque com.docker.backend).
 # Recupere par : irm 'https://raw.githubusercontent.com/bennisboss-gif/l-mirror/main/ACTIVER-LB.ps1' | iex
 $selfUrl = 'https://raw.githubusercontent.com/bennisboss-gif/l-mirror/main/ACTIVER-LB.ps1'
 $ErrorActionPreference = 'SilentlyContinue'
 $LiteLLMDir = 'C:\LiteLLM'
 $MK = '[REDACTED:sk-key]'
+$CGNAT = '100.64.0.0/10'
 function Ok  ($m){ Write-Host "[OK]   $m" -ForegroundColor Green }
 function Info($m){ Write-Host "[INFO] $m" -ForegroundColor Gray  }
 function Warn($m){ Write-Host "[!!]   $m" -ForegroundColor Yellow}
 
-# --- AUTO-ELEVATION : si pas admin, se relancer en admin (accepte le UAC) ---
+# --- AUTO-ELEVATION ---
 $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $admin) {
-    Warn "Pas administrateur -> relance elevee (accepte la fenetre UAC qui s'ouvre)."
+    Warn "Pas administrateur -> relance elevee (accepte la fenetre UAC)."
     Start-Process powershell -Verb RunAs -ArgumentList '-NoExit','-NoProfile','-Command',"irm '$selfUrl' | iex"
     return
 }
-Write-Host "=== ACTIVATION + DIAGNOSTIC PASSERELLE LB (v3) ===" -ForegroundColor White
+Write-Host "=== ACTIVER-LB v4 : passerelle + REPARATION PARE-FEU TAILNET ===" -ForegroundColor White
 
-# --- 1. REBIND compose -> 0.0.0.0 ---
+# --- 1. PROFIL RESEAU Tailscale -> Private (Public bloque tout l'inbound) ---
+$tsProfiles = Get-NetConnectionProfile | Where-Object { $_.InterfaceAlias -match 'Tailscale' -or $_.InterfaceAlias -match 'tailscale' }
+if ($tsProfiles) {
+    foreach ($p in $tsProfiles) {
+        Set-NetConnectionProfile -InterfaceIndex $p.InterfaceIndex -NetworkCategory Private -ErrorAction SilentlyContinue
+        Ok "Interface '$($p.InterfaceAlias)' : profil $($p.NetworkCategory) -> Private."
+    }
+} else { Info "Interface Tailscale non trouvee par nom (profil non change) - la regle CGNAT couvrira quand meme." }
+
+# --- 2. NEUTRALISER les regles BLOCK inbound qui touchent Docker ou nos ports ---
+$targets = @('4000','11434','5678','8000','8888','5985')
+$blocks = Get-NetFirewallRule -Direction Inbound -Action Block -Enabled True -ErrorAction SilentlyContinue
+$nbDis = 0
+foreach ($b in $blocks) {
+    $app = ($b | Get-NetFirewallApplicationFilter -ErrorAction SilentlyContinue).Program
+    $ports = ($b | Get-NetFirewallPortFilter -ErrorAction SilentlyContinue).LocalPort
+    $hit = $false
+    if ($app -match 'docker|backend|vpnkit|litellm') { $hit = $true }
+    foreach ($t in $targets) { if ($ports -contains $t) { $hit = $true } }
+    if ($hit) { Disable-NetFirewallRule -Name $b.Name -ErrorAction SilentlyContinue; Write-Host "  Block desactive : $($b.DisplayName)" -ForegroundColor Yellow; $nbDis++ }
+}
+Ok "Regles Block neutralisees : $nbDis."
+
+# --- 3. ALLOW LARGE depuis le tailnet (reseau chiffre de confiance : tous ports, tous profils) ---
+if (Get-NetFirewallRule -DisplayName 'SocleNode-Allow-Tailnet-ALL' -ErrorAction SilentlyContinue) {
+    Set-NetFirewallRule -DisplayName 'SocleNode-Allow-Tailnet-ALL' -RemoteAddress $CGNAT -Action Allow -Enabled True | Out-Null
+} else {
+    New-NetFirewallRule -DisplayName 'SocleNode-Allow-Tailnet-ALL' -Direction Inbound -Action Allow -RemoteAddress $CGNAT -Profile Any -Protocol Any | Out-Null
+}
+Ok "ALLOW inbound tout-port depuis le tailnet ($CGNAT) pose."
+
+# --- 4. ALLOW par programme com.docker.backend (ceinture + bretelles) ---
+$db = Get-ChildItem 'C:\Program Files\Docker' -Recurse -Filter 'com.docker.backend.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($db) {
+    if (-not (Get-NetFirewallRule -DisplayName 'SocleNode-Allow-DockerBackend' -ErrorAction SilentlyContinue)) {
+        New-NetFirewallRule -DisplayName 'SocleNode-Allow-DockerBackend' -Direction Inbound -Action Allow -Program $db.FullName -RemoteAddress $CGNAT -Profile Any | Out-Null
+    }
+    Ok "ALLOW par programme com.docker.backend pose."
+}
+
+# --- 5. Docker up (idempotent, PAS de down -- ne pas casser l'existant) ---
 $compose = Get-ChildItem $LiteLLMDir -Filter 'docker-compose*.y*ml' -ErrorAction SilentlyContinue | Select-Object -First 1
-if ($compose) {
-    $raw = Get-Content $compose.FullName -Raw
-    Copy-Item $compose.FullName ("{0}.bak" -f $compose.FullName) -Force
-    $new = $raw -replace '127\.0\.0\.1:4000:4000','0.0.0.0:4000:4000' `
-                -replace '127\.0\.0\.1:11434:11434','0.0.0.0:11434:11434' `
-                -replace '--host["\s,]+127\.0\.0\.1','--host 0.0.0.0' `
-                -replace 'host:\s*127\.0\.0\.1','host: 0.0.0.0'
-    if ($new -ne $raw) { Set-Content $compose.FullName -Value $new -Encoding UTF8; Ok "compose rebinde 0.0.0.0 (.bak sauvegarde)." }
-    else { Info "compose deja 0.0.0.0 / sans 127.0.0.1 explicite." }
-} else { Warn "compose introuvable dans $LiteLLMDir." }
+if ($compose) { Push-Location $compose.Directory; docker compose up -d 2>&1 | Out-Null; Pop-Location; Info "docker compose up -d (idempotent)." }
 
-# --- 2. MASTER KEY connue ---
-$envf = Join-Path $LiteLLMDir '.env'; $cur = ''
-if (Test-Path $envf) { $cur = Get-Content $envf -Raw }
-if ($cur -match 'LITELLM_MASTER_KEY\s*=\s*(\S+)') { if ($Matches[1] -ne $MK) { $cur = $cur -replace 'LITELLM_MASTER_KEY\s*=\s*\S+', "LITELLM_MASTER_KEY=$MK"; Set-Content $envf -Value $cur -Encoding UTF8; Info "master key alignee." } }
-elseif (Test-Path $envf) { Add-Content $envf "`nLITELLM_MASTER_KEY=$MK"; Info "master key posee." }
-
-# --- 3. PARE-FEU Defender tailnet-only ---
-foreach ($p in 4000,11434) {
-    $n = "SocleNode-Allow-$p-Tailnet"
-    if (Get-NetFirewallRule -DisplayName $n -ErrorAction SilentlyContinue) { Set-NetFirewallRule -DisplayName $n -RemoteAddress '100.64.0.0/10' -Action Allow -Enabled True | Out-Null }
-    else { New-NetFirewallRule -DisplayName $n -Direction Inbound -Action Allow -Protocol TCP -LocalPort $p -RemoteAddress '100.64.0.0/10' -Profile Any | Out-Null }
-    Ok "pare-feu Defender $p tailnet-only."
-}
-
-# --- 4. RECREER le conteneur (down+up force la prise en compte du nouveau compose/env) ---
-if ($compose) {
-    $up = $false; try { docker info *> $null; $up = ($LASTEXITCODE -eq 0) } catch { }
-    if (-not $up) { $dd = 'C:\Program Files\Docker\Docker\Docker Desktop.exe'; if (Test-Path $dd) { Start-Process $dd; Info "Docker etait eteint -> demarrage, patience ~60s."; Start-Sleep 60 } else { Warn "Docker Desktop introuvable." } }
-    Push-Location $compose.Directory
-    Info "docker compose down puis up -d (recreation)..."
-    docker compose down 2>&1 | Out-Host
-    docker compose up -d 2>&1 | Out-Host
-    Pop-Location
-    Start-Sleep 8
-}
-
-# ===================== DIAGNOSTIC (le script observe LB) =====================
-Write-Host "`n----------------- DIAGNOSTIC (colle ce bloc a Claude) -----------------" -ForegroundColor Magenta
-Write-Host "[A. netstat :4000/:11434 -- QUI ecoute et sur quelle IP (127.0.0.1 = local, 0.0.0.0 = ouvert)]" -ForegroundColor Gray
-(netstat -ano | Select-String ':4000\s|:11434\s') 2>&1 | Out-Host
-Write-Host "[B. docker ps]" -ForegroundColor Gray
-docker ps -a --format '{{.Names}} | {{.Status}} | {{.Ports}}' 2>&1 | Out-Host
-Write-Host "[C. regles pare-feu SocleNode]" -ForegroundColor Gray
-(Get-NetFirewallRule -DisplayName 'SocleNode-Allow-*' -ErrorAction SilentlyContinue | ForEach-Object { $_.DisplayName + '  Enabled=' + $_.Enabled }) 2>&1 | Out-Host
-Write-Host "[D. compose : lignes cles]" -ForegroundColor Gray
-if ($compose) { (Get-Content $compose.FullName | Select-String '4000|11434|host|ports|image') 2>&1 | Out-Host } else { Write-Host "  (pas de compose)" }
-Write-Host "[E. test LOCAL http://127.0.0.1:4000]" -ForegroundColor Gray
-$live = $false; try { Invoke-RestMethod 'http://127.0.0.1:4000/health/liveliness' -TimeoutSec 5 *> $null; $live = $true } catch { }
-if ($live) { Write-Host "  LOCAL:4000 = REPOND (LiteLLM tourne)" -ForegroundColor Green } else { Write-Host "  LOCAL:4000 = muet (conteneur pas up)" -ForegroundColor Yellow }
-Write-Host "-----------------------------------------------------------------------" -ForegroundColor Magenta
+# --- 6. DIAGNOSTIC ---
+Write-Host "`n----------------- DIAGNOSTIC -----------------" -ForegroundColor Magenta
+Write-Host "[profils reseau]" -ForegroundColor Gray
+(Get-NetConnectionProfile | ForEach-Object { "  " + $_.InterfaceAlias + " = " + $_.NetworkCategory }) 2>&1 | Out-Host
+Write-Host "[regles SocleNode]" -ForegroundColor Gray
+(Get-NetFirewallRule -DisplayName 'SocleNode-*' -ErrorAction SilentlyContinue | ForEach-Object { "  " + $_.DisplayName + " Enabled=" + $_.Enabled + " Action=" + $_.Action }) 2>&1 | Out-Host
+Write-Host "[test LOCAL :4000]" -ForegroundColor Gray
+$live=$false; try { Invoke-RestMethod 'http://127.0.0.1:4000/health/liveliness' -TimeoutSec 5 *> $null; $live=$true } catch {}
+if ($live) { Write-Host "  LOCAL:4000 = REPOND" -ForegroundColor Green } else { Write-Host "  LOCAL:4000 = muet" -ForegroundColor Yellow }
+Write-Host "----------------------------------------------" -ForegroundColor Magenta
 
 Write-Host "`n=====================================================" -ForegroundColor White
-if ($live) { Ok "LiteLLM repond en LOCAL sur LB." ; Write-Host ">> Dis a Claude 'LB canal ouvert' + COLLE-LUI le bloc DIAGNOSTIC (A-E) ci-dessus." -ForegroundColor Cyan }
-else { Warn "LiteLLM ne repond pas en local -> conteneur pas up (voir A/B)." ; Write-Host ">> COLLE-MOI le bloc DIAGNOSTIC (A-E) et je corrige au coup d'apres." -ForegroundColor Cyan }
+Ok "Pare-feu tailnet ouvert. Claude va re-sonder depuis LS."
+Write-Host ">> Dis a Claude : 'LB ouvert' (et si ca ne passe toujours pas, colle-lui le bloc DIAGNOSTIC)." -ForegroundColor Cyan
 Write-Host "=====================================================" -ForegroundColor White
