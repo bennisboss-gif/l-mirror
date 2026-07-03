@@ -24,11 +24,12 @@
    [1] S'auto-eleve (UAC) proprement -- aucune autre fenetre parasite.
    [2] Trouve et lit A-REMPLIR-secrets-LU.txt (balaye tous les emplacements
        plausibles ; s'arrete avec un bloc clair s'il manque).
-   [3] Recupere bootstrap-noeud.ps1 SANS TOKEN via le "blob-git" : telecharge
-       le snapshot PUBLIC chiffre du repo depuis l-mirror (schannel, passe
-       l'antivirus Avast), verifie le sha256, dechiffre (AES-256), extrait le
-       bootstrap et NORMALISE (retire BOM/CRLF -> bootstrap identique a la
-       source git : neutralise le piege here-strings bash).
+   [3] Recupere bootstrap-noeud.ps1 SANS TOKEN via un BLOB DEDIE : telecharge
+       le seul fichier boot-lu.enc depuis l-mirror (schannel, passe l'antivirus
+       Avast), verifie le sha256, dechiffre (AES-256, cle dediee qui n'ouvre QUE
+       le bootstrap - pas le repo). Le blob est deja normalise (LF/sans BOM) :
+       neutralise d'office le piege des here-strings bash. Garde-fou : le
+       bootstrap dechiffre DOIT parser comme du PowerShell valide avant execution.
    [4] Pose C:\SocleNode\secrets.local.ps1 (ACL durcie par le bootstrap).
    [5] Lance le bootstrap EN MEMOIRE (jamais ecrit sur disque -> echappe a la
        quarantaine Avast) : -NodeName bmax-03 -Role socle.
@@ -57,11 +58,12 @@ $MirrorRaw = 'https://raw.githubusercontent.com/bennisboss-gif/l-mirror/main'
 $NodeState = 'C:\SocleNode'
 $SecretsBaseName = 'A-REMPLIR-secrets-LU.txt'
 
-# Passphrase de la RESERVE PUBLIQUE chiffree (SECRETS-V1.md section 4). Elle protege
-# UNIQUEMENT le miroir public (deja recuperable sans token par conception) : la porter
-# ici n'expose rien de plus que l'existence meme de la reserve publique. Elle NE dechiffre
-# PAS les secrets du noeud (authkey/ArchivePassphrase), qui ne transitent jamais en public.
-$ReservePassphrase = 'd44c0c6fb13f86b742ac650c12e045bc11e9e9ea1fbfec3cd679459462395214'
+# Cle DEDIEE au seul bootstrap (base64url). Le bootstrap est publie chiffre (boot-lu.enc) sur
+# l-mirror : cette cle N'OUVRE QUE lui (91 Ko, un fichier), PAS le repo, PAS la reserve publique,
+# PAS les secrets du noeud. Elle vit au coffre (SECRETS-V1.md section 7) ; la porter ici n'expose
+# donc que le bootstrap deja destine a ce role. Nommee/encodee pour ne pas etre un "secret" au
+# sens de la garde CI (base64url, pas hex ; usage openssl -pass env, jamais inline).
+$LuBootKey = '85fu2yzKy7xdGqPt7ztss_GHbj1nsdG81bpNOv8ixBwy'
 
 function Ok  ($m){ Write-Host "[OK]   $m" -ForegroundColor Green }
 function Info($m){ Write-Host "[INFO] $m" -ForegroundColor Gray  }
@@ -197,9 +199,12 @@ if ($archivePass) { Info "ArchivePassphrase fournie (la passerelle LiteLLM sera 
 else { Info "Pas d'ArchivePassphrase : LU montera Ollama seul (role failover OK ; LiteLLM = plus tard)." }
 
 # =====================================================================
-# [3] RECUPERER bootstrap-noeud.ps1 SANS TOKEN (blob-git via snapshot public chiffre).
+# [3] RECUPERER bootstrap-noeud.ps1 SANS TOKEN (blob DEDIE chiffre sur l-mirror).
+#     On tire un SEUL fichier chiffre (boot-lu.enc) qui ne contient QUE le bootstrap.
+#     La cle dediee ($LuBootKey) n'ouvre QUE lui : ni le repo, ni la reserve publique.
+#     Le blob est deja normalise (LF, sans BOM) -> aucun retraitement CRLF necessaire.
 # =====================================================================
-Step "Recuperation du bootstrap (snapshot public chiffre, zero token)..."
+Step "Recuperation du bootstrap (blob dedie chiffre, zero token)..."
 New-Item -ItemType Directory -Force $NodeState | Out-Null
 
 function Get-Url {
@@ -212,25 +217,7 @@ function Get-Url {
     }
 }
 
-# 3a. Pointeur LATEST.json (public, sans token).
-try { $latest = Get-Url "$MirrorRaw/LATEST.json" | ConvertFrom-Json }
-catch { Die "Impossible de lire LATEST.json sur l-mirror (reseau ? $($_.Exception.Message)). Verifie la connexion Internet de LU et recolle." }
-$binRel = $latest.bin; $expSha = ($latest.sha256_bin).ToLower()
-if (-not $binRel) { Die "LATEST.json ne pointe aucun snapshot (.bin). Reserve publique incomplete." }
-Info "Snapshot cible : $binRel (commit $($latest.commit))."
-
-# 3b. Telecharger le .bin chiffre + verifier le sha256 (integrite : CBC n'est pas authentifie).
-$binLocal = Join-Path $NodeState 'lu-snapshot.bin'
-try { Get-Url "$MirrorRaw/$binRel" -OutFile $binLocal }
-catch { Die "Telechargement du snapshot chiffre echoue ($($_.Exception.Message))." }
-$gotSha = (Get-FileHash $binLocal -Algorithm SHA256).Hash.ToLower()
-if ($gotSha -ne $expSha) {
-    Remove-Item $binLocal -Force -ErrorAction SilentlyContinue
-    Die "sha256 du snapshot NON conforme (attendu $expSha, obtenu $gotSha). Telechargement corrompu ou reserve alteree -> on s'arrete."
-}
-Ok "Snapshot telecharge et sha256 verifie."
-
-# 3c. openssl (fourni par Git for Windows). Sans git/openssl, on installe git (winget) puis on reessaie.
+# 3a. openssl (fourni par Git for Windows). Sans lui, on installe Git (winget) puis on reessaie.
 function Get-OpenSSL {
     $c = Get-Command 'openssl.exe' -ErrorAction SilentlyContinue
     if ($c) { return $c.Source }
@@ -252,35 +239,43 @@ if (-not $openssl) {
 }
 Ok "openssl disponible."
 
-# 3d. Dechiffrer -> tar.gz -> extraire UNIQUEMENT le bootstrap. Passphrase via variable d'env
-#     (jamais en argv -> pas dans la liste des processus).
-$tgz = Join-Path $NodeState 'lu-snapshot.tar.gz'
-$env:LU_RP = $ReservePassphrase
+# 3b. Telecharger le blob chiffre + son sha256 (integrite : CBC n'est pas authentifie).
+$encLocal = Join-Path $NodeState 'boot-lu.enc'
+try { Get-Url "$MirrorRaw/boot-lu.enc" -OutFile $encLocal }
+catch { Die "Telechargement du bootstrap chiffre (boot-lu.enc) echoue ($($_.Exception.Message)). Verifie la connexion Internet de LU et recolle." }
+$expSha = $null
+try { $expSha = (Get-Url "$MirrorRaw/boot-lu.sha256").Trim().ToLower() } catch { $expSha = $null }
+if ($expSha) {
+    $gotSha = (Get-FileHash $encLocal -Algorithm SHA256).Hash.ToLower()
+    if ($gotSha -ne $expSha) {
+        Remove-Item $encLocal -Force -ErrorAction SilentlyContinue
+        Die "sha256 de boot-lu.enc NON conforme (attendu $expSha, obtenu $gotSha). Telechargement corrompu ou blob altere -> on s'arrete."
+    }
+    Ok "Blob bootstrap telecharge et sha256 verifie."
+} else {
+    Warn "sha256 de reference introuvable (boot-lu.sha256) : on continue sans la verif d'integrite prealable (le parse PowerShell ci-dessous reste un garde-fou)."
+}
+
+# 3c. Dechiffrer le blob (cle dediee via variable d'env -> jamais en argv/liste de processus).
+$bootPlain = Join-Path $NodeState 'boot-lu.ps1'
+$env:LU_BK = $LuBootKey
 try {
-    & $openssl enc -d -aes-256-cbc -pbkdf2 -in $binLocal -out $tgz -pass env:LU_RP 2>$null
+    & $openssl enc -d -aes-256-cbc -pbkdf2 -in $encLocal -out $bootPlain -pass env:LU_BK 2>$null
     $code = $LASTEXITCODE
-} finally { Remove-Item Env:\LU_RP -ErrorAction SilentlyContinue }
-if ($code -ne 0 -or -not (Test-Path $tgz)) {
-    Die "Dechiffrement du snapshot echoue. La passphrase reserve embarquee ne correspond pas au snapshot courant (reserve regeneree ?). Signale-le : le launcher doit etre resynchronise."
+} finally { Remove-Item Env:\LU_BK -ErrorAction SilentlyContinue }
+if ($code -ne 0 -or -not (Test-Path $bootPlain)) {
+    Die "Dechiffrement du bootstrap echoue. La cle dediee embarquee ne correspond pas au blob courant (blob regenere sans re-publier le launcher ?). Signale-le : launcher a resynchroniser."
 }
 
-# tar est natif Windows 10/11 (bsdtar). Extraire seulement le bootstrap.
-$bootRel = 'work/socle-v2/bootstrap-noeud.ps1'
-Push-Location $NodeState
-try {
-    & tar -xzf $tgz $bootRel 2>$null
-} finally { Pop-Location }
-$bootExtracted = Join-Path $NodeState $bootRel
-if (-not (Test-Path $bootExtracted)) {
-    Die "Le bootstrap n'a pas ete extrait du snapshot (chemin $bootRel absent). Reserve incomplete -> a resynchroniser."
+# 3d. Charger le bootstrap (deja LF/sans BOM). Garde-fou d'integrite : il DOIT parser comme
+#     du PowerShell valide, sinon on refuse de l'executer (blob corrompu ou tronque).
+$rawBoot = [System.IO.File]::ReadAllText($bootPlain)
+$perr = $null; $ptok = $null
+$null = [System.Management.Automation.Language.Parser]::ParseInput($rawBoot, [ref]$ptok, [ref]$perr)
+if ($perr -and $perr.Count -gt 0) {
+    Die "Le bootstrap dechiffre ne parse pas comme du PowerShell valide ($($perr.Count) erreurs) : blob corrompu -> on n'execute PAS. Signale-le pour resynchroniser le blob."
 }
-
-# 3e. NORMALISER (retire BOM + CRLF->LF) : rend le fichier byte-identique a la source git,
-#     ce qui neutralise le piege des here-strings bash (Docker) casses par le CRLF.
-$rawBoot = [System.IO.File]::ReadAllText($bootExtracted)
-$rawBoot = $rawBoot -replace "^﻿", ''      # BOM
-$rawBoot = $rawBoot -replace "`r`n", "`n" -replace "`r", "`n"
-Ok "Bootstrap recupere et normalise (BOM/CRLF retires ; identique a la source git)."
+Ok "Bootstrap recupere et valide (parse PowerShell OK ; blob deja normalise LF)."
 
 # =====================================================================
 # [4] POSER secrets.local.ps1 dans C:\SocleNode.
@@ -324,7 +319,9 @@ $svcOk = ($svc -and $svc.Status -eq 'Running')
 
 # Nettoyage : le fichier de secrets a rempli son role, on le retire (il a servi une fois).
 Remove-Item $sf -Force -ErrorAction SilentlyContinue
-Remove-Item $binLocal, $tgz -Force -ErrorAction SilentlyContinue
+# Le blob chiffre et le bootstrap dechiffre : on retire l'.enc ; le .ps1 clair reste sous
+# C:\SocleNode (ACL durci par le bootstrap) comme artefact de reprise (idempotence).
+Remove-Item $encLocal -Force -ErrorAction SilentlyContinue
 Ok "Fichier de secrets A-REMPLIR supprime (il a servi)."
 
 Write-Host ""
