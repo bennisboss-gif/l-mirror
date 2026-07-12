@@ -1,9 +1,9 @@
 {
-  "bin": "https://raw.githubusercontent.com/bennisboss-gif/l/main/lignee/v19_bundle.bin",
-  "sha256_bin": "f8f1b85b71e32b5aa09a92ee416281001308cd37ad37c3844a8129c16308c1dd",
-  "maj": "20260707T182638Z",
-  "commit": "80167cc",
-  "version": "v0.19",
-  "lignee": "v0.19_bundle.bin",
-  "note": "v0.19 COURANT (reserve publique, canal 3/3 redondance). Decryption: openssl enc -d -aes-256-cbc -pbkdf2 -pass pass:292f2f015952e6582410c49721a3d95a837dd64d81484b15dba22f038f8907ba"
+  "bin": "https://raw.githubusercontent.com/bennisboss-gif/l-mirror/main/snapshots/l-2026-07-12.tar.gz.bin",
+  "sha256_bin": "96b3eb8bbbaaa21d2f4b25123d03bc427c56ba79eaf78801a0f163a2c76769be",
+  "maj": "2026-07-12",
+  "date": "2026-07-12",
+  "version": "v0.21",
+  "lignee": "v0.21_bundle.bin",
+  "note": "v0.21 COURANT (reserve publique, canal 3/3 redondance). Bundle chiffre openssl aes-256-cbc -pbkdf2 (identique bundle §3). Passphrase NON publiee ici (SECRETS.md prive)."
 }
