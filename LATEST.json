@@ -1,9 +1,13 @@
 {
-  "bin": "https://raw.githubusercontent.com/bennisboss-gif/l-mirror/main/snapshots/l-2026-07-12.tar.gz.bin",
-  "sha256_bin": "96b3eb8bbbaaa21d2f4b25123d03bc427c56ba79eaf78801a0f163a2c76769be",
-  "maj": "2026-07-12",
-  "date": "2026-07-12",
-  "version": "v0.21",
-  "lignee": "v0.21_bundle.bin",
-  "note": "v0.21 COURANT (reserve publique, canal 3/3 redondance). Bundle chiffre openssl aes-256-cbc -pbkdf2 (identique bundle §3). Passphrase NON publiee ici (SECRETS.md prive)."
+  "bin": "https://raw.githubusercontent.com/bennisboss-gif/l-mirror/main/snapshots/l-2026-07-25.tar.gz.bin",
+  "sha256_bin": "9ed424ab56f5625dab0214b7ec021327fdbfc80a307a86adf34001d7f6e1880a",
+  "maj": "2026-07-25",
+  "date": "2026-07-25",
+  "version": "v0.22",
+  "lignee": "v22_bundle.bin",
+  "registre": "LA Solution",
+  "edition": 22,
+  "decimale": "0.820",
+  "vivantes": 72,
+  "note": "v0.22 COURANT (reserve publique, canal 3/3 redondance). Bundle chiffre openssl aes-256-cbc -pbkdf2 (identique au bundle du repo prive). Passphrase NON publiee ici : elle vit au coffre, sous le nom LIGNEE_PP_V22. Base reconstruite event-complete ; registre renomme LA Solution."
 }
